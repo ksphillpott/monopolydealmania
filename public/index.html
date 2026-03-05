@@ -40,7 +40,7 @@ const COLORS = {
 const HOUSE_BONUS=3, HOTEL_BONUS=4;
 const PROP_NAMES={brown:["Mediterranean Avenue","Baltic Avenue"],lightBlue:["Oriental Avenue","Vermont Avenue","Connecticut Avenue"],pink:["St. Charles Place","States Avenue","Virginia Avenue"],orange:["St. James Place","Tennessee Avenue","New York Avenue"],red:["Kentucky Avenue","Indiana Avenue","Illinois Avenue"],yellow:["Ventnor Avenue","Marvin Gardens","Atlantic Avenue"],green:["Pacific Avenue","North Carolina Avenue","Pennsylvania Avenue"],darkBlue:["Park Place","Boardwalk"],railroad:["Reading Railroad","Pennsylvania Railroad","B&O Railroad","Short Line"],utility:["Electric Company","Water Works"]};
 const AI_NAMES=["Penny","Rich Uncle","Top Hat","Thimble"];
-const AI_DIFF={easy:{name:"Easy",emoji:"🟢",jsn:0.15},medium:{name:"Medium",emoji:"🟡",jsn:0.4},hard:{name:"Hard",emoji:"🔴",jsn:0.7},expert:{name:"Expert",emoji:"💀",jsn:0.9}};
+const AI_DIFF={easy:{name:"Easy",emoji:"🟢",jsn:0.15},medium:{name:"Medium",emoji:"🟡",jsn:0.55},hard:{name:"Hard",emoji:"🔴",jsn:0.75},expert:{name:"Expert",emoji:"💀",jsn:0.92}};
 const GAME_MODES=[
   {id:"original",name:"Original",sub:"Classic 110-card",icon:"🃏",ok:true,bg:"linear-gradient(135deg,#c0392b,#e74c3c)",accent:"#f39c12"},
   {id:"millionaire",name:"Millionaire",sub:"Race to $1,000,000",icon:"💎",ok:true,bg:"linear-gradient(135deg,#6c3483,#8e44ad)",accent:"#bb8fce"},
@@ -149,22 +149,23 @@ function endTurn(st){let s=dc(st);const p=s.players[s.currentPlayer];if(p.hand.l
 function humanDisc(st,ids){let s=dc(st);const p=s.players[s.currentPlayer];ids.forEach(id=>{const i=p.hand.findIndex(c=>c.id===id);if(i!==-1)s.discardPile.push(p.hand.splice(i,1)[0]);});s.currentPlayer=(s.currentPlayer+1)%s.players.length;s.turnNumber++;s.phase="draw";s.playsRemaining=0;s.discardNeeded=0;return s;}
 
 function getAIMove(st,diff){const p=st.players[st.currentPlayer];if(!p.hand.length||st.playsRemaining<=0)return null;const m=[];const isMill=st.mode==="millionaire";const bankBoost=isMill?3:0;
+const myComp=compSets(p);const maxOppComp=Math.max(0,...st.players.filter((_,i)=>i!==st.currentPlayer).map(x=>compSets(x)));const urgent=maxOppComp>=2;
 for(const card of p.hand){
   if(card.type==="money")m.push({a:"bank",card,pri:1+card.value*0.1+bankBoost+card.value*(isMill?0.5:0)});
-  if(card.type==="property"){if(card.subtype==="wild"||card.subtype==="rainbow"){const cols=card.subtype==="rainbow"?Object.keys(COLORS).filter(c=>c!=="railroad"&&c!=="utility"):card.colors;let best=card.currentColor,bp=0;cols.forEach(c=>{const need=COLORS[c].required-(p.properties[c]||[]).length;const pr=need===1?18:need===2?10:need<=0?2:5;if(pr>bp){bp=pr;best=c;}});m.push({a:"prop",card,color:best,pri:bp});if(card.value>0)m.push({a:"bank",card,pri:2});}else{const need=COLORS[card.color].required-(p.properties[card.color]||[]).length;m.push({a:"prop",card,color:card.color,pri:need===1?18:need===2?10:5});}}
-  if(card.subtype==="passGo")m.push({a:"passGo",card,pri:12});
-  if(card.subtype==="birthday")m.push({a:"bday",card,pri:8+(st.players.length-1)});
-  if(card.subtype==="debtCollector"){const opps=st.players.filter((_,i)=>i!==st.currentPlayer).sort((a,b)=>totAssets(b)-totAssets(a));if(opps[0]&&totAssets(opps[0])>0)m.push({a:"debt",card,target:opps[0].id,pri:9});else m.push({a:"bank",card,pri:2});}
-  if(card.subtype==="rent"||card.subtype==="multiRent"){let bc=null,br=0;const cols=card.subtype==="multiRent"?Object.keys(p.properties):(card.colors||[]).filter(c=>(p.properties[c]||[]).length>0);cols.forEach(c=>{const r=rentV(p,c);if(r>br){br=r;bc=c;}});if(bc&&br>0){const drs=p.hand.filter(c=>c.subtype==="doubleRent"&&c.id!==card.id);m.push({a:"rent",card,color:bc,drIds:drs.slice(0,Math.min(drs.length,st.playsRemaining-1)).map(c=>c.id),pri:7+br*1.5});}else if(card.value>0)m.push({a:"bank",card,pri:2});}
-  if(card.subtype==="slyDeal"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.entries(opp.properties).forEach(([c,cards])=>{if(isComp(opp,c))return;cards.forEach(pc=>{const need=COLORS[c].required-(p.properties[c]||[]).length;const pr=need<=1?16:need<=2?8:5;if(pr>bp){bp=pr;best={tp:oi,tc:pc.id};}});});});if(best)m.push({a:"sly",card,...best,pri:bp});else m.push({a:"bank",card,pri:2});}
-  if(card.subtype==="dealBreaker"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.keys(opp.properties).forEach(c=>{if(!isComp(opp,c))return;let pr=22+(COLORS[c]?.rents?.slice(-1)[0]||0);if(compSets(opp)>=2)pr+=10;if(pr>bp){bp=pr;best={tp:oi,tc:c};}});});if(best)m.push({a:"db",card,...best,pri:bp});else m.push({a:"bank",card,pri:3});}
-  if(card.subtype==="forcedDeal"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.entries(opp.properties).forEach(([tc,tCards])=>{tCards.forEach(tCard=>{const need=COLORS[tc].required-(p.properties[tc]||[]).length;Object.entries(p.properties).forEach(([mc,mCards])=>{mCards.forEach(mCard=>{let pr=need<=1?14:need<=2?7:3;if(mCards.length>(COLORS[mc]?.required||99))pr+=3;if(pr>bp){bp=pr;best={tp:oi,tci:tCard.id,tco:tc,mci:mCard.id,mco:mc};}});});});});});if(best&&bp>5)m.push({a:"fd",card,...best,pri:bp});else m.push({a:"bank",card,pri:2});}
-  if(card.subtype==="house"){let ok=false;Object.keys(p.properties).forEach(c=>{if(c!=="railroad"&&c!=="utility"&&isComp(p,c)&&!p.sets?.[c]?.house){m.push({a:"house",card,color:c,pri:7});ok=true;}});if(!ok)m.push({a:"bank",card,pri:2});}
-  if(card.subtype==="hotel"){let ok=false;Object.keys(p.properties).forEach(c=>{if(p.sets?.[c]?.house&&!p.sets?.[c]?.hotel){m.push({a:"hotel",card,color:c,pri:8});ok=true;}});if(!ok)m.push({a:"bank",card,pri:2});}
+  if(card.type==="property"){if(card.subtype==="wild"||card.subtype==="rainbow"){const cols=card.subtype==="rainbow"?Object.keys(COLORS).filter(c=>c!=="railroad"&&c!=="utility"):card.colors;let best=card.currentColor,bp=0;cols.forEach(c=>{const need=COLORS[c].required-(p.properties[c]||[]).length;const pr=need===1?22:need===2?12:need<=0?2:6;if(pr>bp){bp=pr;best=c;}});m.push({a:"prop",card,color:best,pri:bp});if(card.value>0)m.push({a:"bank",card,pri:2});}else{const need=COLORS[card.color].required-(p.properties[card.color]||[]).length;m.push({a:"prop",card,color:card.color,pri:need===1?22:need===2?12:6});}}
+  if(card.subtype==="passGo")m.push({a:"passGo",card,pri:myComp>=2?8:13});
+  if(card.subtype==="birthday")m.push({a:"bday",card,pri:10+(st.players.length-1)});
+  if(card.subtype==="debtCollector"){const opps=st.players.filter((_,i)=>i!==st.currentPlayer).sort((a,b)=>totAssets(b)-totAssets(a));if(opps[0]&&totAssets(opps[0])>0)m.push({a:"debt",card,target:opps[0].id,pri:11});else m.push({a:"bank",card,pri:2});}
+  if(card.subtype==="rent"||card.subtype==="multiRent"){let bc=null,br=0;const cols=card.subtype==="multiRent"?Object.keys(p.properties):(card.colors||[]).filter(c=>(p.properties[c]||[]).length>0);cols.forEach(c=>{const r=rentV(p,c);if(r>br){br=r;bc=c;}});if(bc&&br>0){const drs=p.hand.filter(c=>c.subtype==="doubleRent"&&c.id!==card.id);m.push({a:"rent",card,color:bc,drIds:drs.slice(0,Math.min(drs.length,st.playsRemaining-1)).map(c=>c.id),pri:8+br*2});}else if(card.value>0)m.push({a:"bank",card,pri:2});}
+  if(card.subtype==="slyDeal"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.entries(opp.properties).forEach(([c,cards])=>{if(isComp(opp,c))return;cards.forEach(pc=>{const need=COLORS[c].required-(p.properties[c]||[]).length;let pr=need<=1?19:need<=2?10:6;if(urgent)pr+=5;if(pr>bp){bp=pr;best={tp:oi,tc:pc.id};}});});});if(best)m.push({a:"sly",card,...best,pri:bp});else m.push({a:"bank",card,pri:2});}
+  if(card.subtype==="dealBreaker"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.keys(opp.properties).forEach(c=>{if(!isComp(opp,c))return;let pr=25+(COLORS[c]?.rents?.slice(-1)[0]||0);if(compSets(opp)>=2)pr+=15;if(pr>bp){bp=pr;best={tp:oi,tc:c};}});});if(best)m.push({a:"db",card,...best,pri:bp});else m.push({a:"bank",card,pri:3});}
+  if(card.subtype==="forcedDeal"){let best=null,bp=0;st.players.forEach((opp,oi)=>{if(oi===st.currentPlayer)return;Object.entries(opp.properties).forEach(([tc,tCards])=>{tCards.forEach(tCard=>{const need=COLORS[tc].required-(p.properties[tc]||[]).length;Object.entries(p.properties).forEach(([mc,mCards])=>{mCards.forEach(mCard=>{let pr=need<=1?16:need<=2?9:4;if(mCards.length>(COLORS[mc]?.required||99))pr+=3;if(pr>bp){bp=pr;best={tp:oi,tci:tCard.id,tco:tc,mci:mCard.id,mco:mc};}});});});});});if(best&&bp>5)m.push({a:"fd",card,...best,pri:bp});else m.push({a:"bank",card,pri:2});}
+  if(card.subtype==="house"){let ok=false;Object.keys(p.properties).forEach(c=>{if(c!=="railroad"&&c!=="utility"&&isComp(p,c)&&!p.sets?.[c]?.house){m.push({a:"house",card,color:c,pri:9});ok=true;}});if(!ok)m.push({a:"bank",card,pri:2});}
+  if(card.subtype==="hotel"){let ok=false;Object.keys(p.properties).forEach(c=>{if(p.sets?.[c]?.house&&!p.sets?.[c]?.hotel){m.push({a:"hotel",card,color:c,pri:10});ok=true;}});if(!ok)m.push({a:"bank",card,pri:2});}
   if(card.subtype==="doubleRent")m.push({a:"bank",card,pri:1});
   if(card.subtype==="justSayNo"&&p.hand.filter(c=>c.subtype==="justSayNo").length>2)m.push({a:"bank",card,pri:3});
 }
-if(!m.length)return null;const mod={easy:0.25,medium:0.55,hard:0.82,expert:1.0}[diff]||0.5;m.forEach(x=>{x.pri*=(mod+Math.random()*(1-mod));});m.sort((a,b)=>b.pri-a.pri);return m[0];}
+if(!m.length)return null;const mod={easy:0.3,medium:0.75,hard:0.9,expert:1.0}[diff]||0.5;m.forEach(x=>{x.pri*=(mod+Math.random()*(1-mod));});m.sort((a,b)=>b.pri-a.pri);return m[0];}
 
 function execAI(st,m){if(!m)return st;switch(m.a){case"bank":return bankCard(st,m.card.id);case"prop":return playProp(st,m.card.id,m.color);case"passGo":return playPassGo(st,m.card.id);case"bday":return playBday(st,m.card.id);case"debt":return playDebt(st,m.card.id,m.target);case"rent":return playRent(st,m.card.id,m.color,m.drIds||[]);case"sly":return playSly(st,m.card.id,m.tp,m.tc);case"db":return playDB(st,m.card.id,m.tp,m.tc);case"fd":return playFD(st,m.card.id,m.mci,m.mco,m.tp,m.tci,m.tco);case"house":return playHouse(st,m.card.id,m.color);case"hotel":return playHotel(st,m.card.id,m.color);default:return bankCard(st,m.card.id);}}
 
@@ -219,85 +220,91 @@ function App(){
   const prevTurn=useRef(null);
   useEffect(()=>{if(!gs)return;if(prevTurn.current!==null&&gs.currentPlayer===0&&prevTurn.current!==0){showBanner("Your turn!","#2ecc71");}prevTurn.current=gs.currentPlayer;},[gs?.currentPlayer]);
 
-  // AI automation loop — ref-based timer prevents cleanup races
-  const aiTimer=useRef(null);
-  const clearAI=useCallback(()=>{if(aiTimer.current){clearTimeout(aiTimer.current);aiTimer.current=null;}},[]);
+  // AI automation — interval-based polling, immune to effect cleanup races
+  const gsRef=useRef(gs);
+  gsRef.current=gs;
+  const aiPending=useRef(false);
 
   useEffect(()=>{
-    clearAI();
-    if(!gs||gs.winner!==null)return clearAI;
+    const iv=setInterval(()=>{
+      const g=gsRef.current;
+      if(!g||g.winner!==null||aiPending.current)return;
 
-    const schedule=(fn,delay)=>{
-      aiTimer.current=setTimeout(()=>{aiTimer.current=null;fn();},Math.max(50,delay));
-    };
+      // JSN — AI responds
+      if(g.phase==="justSayNoPrompt"&&g.pendingAction){
+        const chain=g.pendingAction.jsnChain||[];
+        const ri=chain.length%2===0?g.pendingAction.current:g.pendingAction.fromPlayer;
+        if(ri===0)return;
+        aiPending.current=true;
+        setTimeout(()=>{
+          setGs(prev=>{
+            if(!prev?.pendingAction?.awaitJSN){aiPending.current=false;return prev;}
+            const pa=prev.pendingAction;const ch=pa.jsnChain||[];
+            const respIdx=ch.length%2===0?pa.current:pa.fromPlayer;
+            if(respIdx===0){aiPending.current=false;return prev;}
+            const rp=prev.players[respIdx];
+            aiPending.current=false;
+            if(hasJSN(rp)&&Math.random()<(AI_DIFF[rp.difficulty]?.jsn||0.3)&&(pa.type==="dealBreaker"||Math.random()<0.7)){
+              return playJSN(prev,respIdx);
+            }
+            return decJSN(prev);
+          });
+        },spd);
+        return;
+      }
 
-    // JSN prompt — AI responds
-    if(gs.phase==="justSayNoPrompt"&&gs.pendingAction){
-      const a=gs.pendingAction,chain=a.jsnChain||[];
-      const ri=chain.length%2===0?a.current:a.fromPlayer;
-      if(ri===0)return clearAI;
-      schedule(()=>{
-        setGs(prev=>{
-          if(!prev?.pendingAction?.awaitJSN)return prev;
-          const pa=prev.pendingAction;const ch=pa.jsnChain||[];
-          const respIdx=ch.length%2===0?pa.current:pa.fromPlayer;
-          if(respIdx===0)return prev;
-          const rp=prev.players[respIdx];
-          if(hasJSN(rp)&&Math.random()<(AI_DIFF[rp.difficulty]?.jsn||0.3)&&(pa.type==="dealBreaker"||Math.random()<0.7)){
-            return playJSN(prev,respIdx);
-          }
-          return decJSN(prev);
-        });
-      },spd);
-      return clearAI;
-    }
+      // Payment — AI pays
+      if(g.phase==="awaitingPayment"&&g.pendingAction?.current!==null&&g.pendingAction.current!==0){
+        aiPending.current=true;
+        setTimeout(()=>{
+          setGs(prev=>{
+            aiPending.current=false;
+            if(!prev?.pendingAction||prev.pendingAction.current===null||prev.pendingAction.current===0)return prev;
+            return autoPay(prev,prev.pendingAction.current);
+          });
+        },spd);
+        return;
+      }
 
-    // Payment — AI pays
-    if(gs.phase==="awaitingPayment"&&gs.pendingAction?.current!==null&&gs.pendingAction.current!==0){
-      schedule(()=>{
-        setGs(prev=>{
-          if(!prev?.pendingAction||prev.pendingAction.current===null||prev.pendingAction.current===0)return prev;
-          return autoPay(prev,prev.pendingAction.current);
-        });
-      },spd);
-      return clearAI;
-    }
+      // Human's turn
+      if(g.currentPlayer===0)return;
 
-    // Human's turn — don't automate
-    if(gs.currentPlayer===0)return clearAI;
+      // Draw
+      if(g.phase==="draw"){
+        aiPending.current=true;
+        setTimeout(()=>{
+          setGs(prev=>{
+            aiPending.current=false;
+            if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;
+            return startTurn(prev);
+          });
+        },spd);
+        return;
+      }
 
-    // Draw phase — AI draws
-    if(gs.phase==="draw"){
-      schedule(()=>{
-        setGs(prev=>{
-          if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;
-          return startTurn(prev);
-        });
-      },spd);
-      return clearAI;
-    }
-
-    // Play phase — AI makes one move
-    if(gs.phase==="play"){
-      schedule(()=>{
-        setGs(prev=>{
-          if(!prev||prev.winner!==null||prev.phase!=="play"||prev.currentPlayer===0)return prev;
-          const cp=prev.players[prev.currentPlayer];
-          const move=getAIMove(prev,cp?.difficulty||"easy");
-          if(move&&prev.playsRemaining>0){
-            let n=execAI(prev,move);
-            if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
-            if(n.playsRemaining<=0)return endTurn(n);
-            return n;
-          }
-          return endTurn(prev);
-        });
-      },spd);
-      return clearAI;
-    }
-
-    return clearAI;
-  },[gs?.currentPlayer,gs?.phase,gs?.playsRemaining,gs?.pendingAction?.current,gs?.pendingAction?.jsnChain?.length,gs?.winner,spd,clearAI]);
+      // Play
+      if(g.phase==="play"){
+        aiPending.current=true;
+        setTimeout(()=>{
+          setGs(prev=>{
+            aiPending.current=false;
+            if(!prev||prev.winner!==null||prev.phase!=="play"||prev.currentPlayer===0)return prev;
+            const cp=prev.players[prev.currentPlayer];
+            const move=getAIMove(prev,cp?.difficulty||"easy");
+            if(move&&prev.playsRemaining>0){
+              let n=execAI(prev,move);
+              if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
+              if(n.playsRemaining<=0)return endTurn(n);
+              return n;
+            }
+            return endTurn(prev);
+          });
+        },spd);
+        return;
+      }
+    },200);
+    return()=>clearInterval(iv);
+  },[spd]);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[gs?.log?.length]);
 
