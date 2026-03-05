@@ -172,7 +172,7 @@ const Card=({card,small,onClick,selected,disabled})=>{
   const iM=card.type==="money",iP=card.type==="property",iA=card.type==="action";
   let bg="#f0f0e8",bc="#999",tc="#333",title="",sub="",icon="";
   if(iM){bg=card.value>=5?"#ffeaa7":"#dfe6e9";bc=card.value>=5?"#fdcb6e":"#b2bec3";title=`$${card.value}M`;icon="💵";}
-  else if(iP){const c=card.subtype==="standard"?card.color:card.currentColor;bg=COLORS[c]?.bg||"#ccc";tc=COLORS[c]?.text||"#333";bc=bg;if(card.subtype==="standard"){title=card.name?.split(" ").pop()||"";sub=card.name?.split(" ").slice(0,-1).join(" ")||"";}else if(card.subtype==="rainbow"){title="WILD";icon="🌈";}else{title="WILD";sub=card.colors?.map(c=>COLORS[c]?.name?.substring(0,3)).join("/")||"";}}
+  else if(iP){const c=card.subtype==="standard"?card.color:card.currentColor;bg=COLORS[c]?.bg||"#ccc";tc=COLORS[c]?.text||"#333";bc=bg;if(card.subtype==="standard"){title=card.name||"";sub="";}else if(card.subtype==="rainbow"){title="WILD";icon="🌈";}else{title="WILD";sub=card.colors?.map(c=>COLORS[c]?.name?.substring(0,3)).join("/")||"";}}
   else if(iA){const st={passGo:{bg:"#55efc4",icon:"▶",bc:"#00b894"},dealBreaker:{bg:"#fd79a8",icon:"💔",bc:"#e84393"},slyDeal:{bg:"#a29bfe",icon:"🤫",bc:"#6c5ce7"},forcedDeal:{bg:"#fdcb6e",icon:"🔄",bc:"#f39c12"},debtCollector:{bg:"#fab1a0",icon:"💰",bc:"#e17055"},birthday:{bg:"#ff7675",icon:"🎂",bc:"#d63031"},doubleRent:{bg:"#ffeaa7",icon:"×2",bc:"#fdcb6e"},justSayNo:{bg:"#74b9ff",icon:"🚫",bc:"#0984e3"},rent:{bg:"#dfe6e9",icon:"🏠",bc:"#636e72"},multiRent:{bg:"#2d3436",icon:"🏠",bc:"#636e72"},house:{bg:"#00b894",icon:"🏡",bc:"#00b894"},hotel:{bg:"#e17055",icon:"🏨",bc:"#d63031"}}[card.subtype]||{bg:"#dfe6e9",icon:"🃏",bc:"#999"};bg=st.bg;bc=st.bc;icon=st.icon;title=cn(card);if(card.subtype==="multiRent")tc="#FFF";}
   const w=small?52:72,h=small?78:105,fs=small?7:9;
   return <div onClick={disabled?undefined:onClick} style={{width:w,height:h,borderRadius:small?6:8,background:bg,border:`2px solid ${selected?"#FFD700":bc}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,padding:small?2:4,cursor:disabled?"default":onClick?"pointer":"default",boxShadow:selected?"0 0 12px rgba(255,215,0,0.8)":"0 2px 6px rgba(0,0,0,0.2)",transform:selected?"translateY(-4px)":"none",transition:"all 0.15s",opacity:disabled?0.5:1,overflow:"hidden",position:"relative"}}>
@@ -189,7 +189,6 @@ function App(){
   const[screen,setScreen]=useState(SCR.HOME);
   const[gs,setGs]=useState(null);
   const[sel,setSel]=useState(null);
-  const[aiThink,setAiThink]=useState(false);
   const[diffs,setDiffs]=useState(["easy","medium"]);
   const[numOpp,setNumOpp]=useState(2);
   const[stats,setSS]=useState(()=>loadSt());
@@ -220,28 +219,78 @@ function App(){
   const prevTurn=useRef(null);
   useEffect(()=>{if(!gs)return;if(prevTurn.current!==null&&gs.currentPlayer===0&&prevTurn.current!==0){showBanner("Your turn!","#2ecc71");}prevTurn.current=gs.currentPlayer;},[gs?.currentPlayer]);
 
+  // AI automation loop
   useEffect(()=>{
-    if(!gs||gs.winner!==null||aiThink)return;
-    if(gs.phase==="justSayNoPrompt"&&gs.pendingAction){const a=gs.pendingAction,chain=a.jsnChain||[];const ri=chain.length%2===0?a.current:a.fromPlayer;if(ri===0)return;const t=setTimeout(()=>{setGs(prev=>{if(!prev?.pendingAction?.awaitJSN)return prev;const pa=prev.pendingAction;const ch=pa.jsnChain||[];const respIdx=ch.length%2===0?pa.current:pa.fromPlayer;if(respIdx===0)return prev;const rp=prev.players[respIdx];if(hasJSN(rp)&&Math.random()<(AI_DIFF[rp.difficulty]?.jsn||0.3)&&(pa.type==="dealBreaker"||Math.random()<0.7)){showBanner(`${rp.name}: Just Say No! 🚫`,"#0984e3");return playJSN(prev,respIdx);}return decJSN(prev);});},spd+100);return()=>clearTimeout(t);}
-    if(gs.phase==="awaitingPayment"&&gs.pendingAction?.current!==null&&gs.pendingAction.current!==0){const targetIdx=gs.pendingAction.current;const t=setTimeout(()=>setGs(prev=>{if(!prev?.pendingAction||prev.pendingAction.current===null||prev.pendingAction.current===0)return prev;return autoPay(prev,prev.pendingAction.current);}),spd-100);return()=>clearTimeout(t);}
+    if(!gs||gs.winner!==null)return;
+
+    // JSN prompt — AI responds
+    if(gs.phase==="justSayNoPrompt"&&gs.pendingAction){
+      const a=gs.pendingAction,chain=a.jsnChain||[];
+      const ri=chain.length%2===0?a.current:a.fromPlayer;
+      if(ri===0)return; // human responds via UI
+      const t=setTimeout(()=>{
+        setGs(prev=>{
+          if(!prev?.pendingAction?.awaitJSN)return prev;
+          const pa=prev.pendingAction;const ch=pa.jsnChain||[];
+          const respIdx=ch.length%2===0?pa.current:pa.fromPlayer;
+          if(respIdx===0)return prev;
+          const rp=prev.players[respIdx];
+          if(hasJSN(rp)&&Math.random()<(AI_DIFF[rp.difficulty]?.jsn||0.3)&&(pa.type==="dealBreaker"||Math.random()<0.7)){
+            return playJSN(prev,respIdx);
+          }
+          return decJSN(prev);
+        });
+      },spd+100);
+      return()=>clearTimeout(t);
+    }
+
+    // Payment — AI pays
+    if(gs.phase==="awaitingPayment"&&gs.pendingAction?.current!==null&&gs.pendingAction.current!==0){
+      const t=setTimeout(()=>{
+        setGs(prev=>{
+          if(!prev?.pendingAction||prev.pendingAction.current===null||prev.pendingAction.current===0)return prev;
+          return autoPay(prev,prev.pendingAction.current);
+        });
+      },spd-100);
+      return()=>clearTimeout(t);
+    }
+
+    // Not AI's turn
     if(isMyTurn)return;
-    if(gs.phase==="draw"){const t=setTimeout(()=>setGs(prev=>{if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;return startTurn(prev);}),spd);return()=>clearTimeout(t);}
-    if(gs.phase==="play"){setAiThink(true);const t=setTimeout(()=>{
-      setGs(prev=>{
-        if(!prev||prev.winner!==null||prev.phase!=="play"||prev.currentPlayer===0)return prev;
-        const move=getAIMove(prev,prev.players[prev.currentPlayer]?.difficulty||"easy");
-        if(move&&prev.playsRemaining>0){
-          let n=execAI(prev,move);
-          if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
-          if(n.playsRemaining<=0)return endTurn(n);
-          // Still has plays — let the effect re-fire to make next move
-          return n;
-        }
-        return endTurn(prev);
-      });
-      setAiThink(false);
-    },spd+Math.random()*300);return()=>{clearTimeout(t);setAiThink(false);};}
-  },[gs?.currentPlayer,gs?.phase,gs?.playsRemaining,gs?.pendingAction?.current,gs?.pendingAction?.jsnChain?.length,gs?.winner,isMyTurn,aiThink,spd]);
+
+    // Draw phase
+    if(gs.phase==="draw"){
+      const t=setTimeout(()=>{
+        setGs(prev=>{
+          if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;
+          return startTurn(prev);
+        });
+      },spd);
+      return()=>clearTimeout(t);
+    }
+
+    // Play phase — AI makes one move per effect cycle
+    if(gs.phase==="play"){
+      const t=setTimeout(()=>{
+        setGs(prev=>{
+          if(!prev||prev.winner!==null||prev.phase!=="play"||prev.currentPlayer===0)return prev;
+          const cp=prev.players[prev.currentPlayer];
+          const move=getAIMove(prev,cp?.difficulty||"easy");
+          if(move&&prev.playsRemaining>0){
+            let n=execAI(prev,move);
+            // If action created a pending action or changed phase, stop and let next effect cycle handle it
+            if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
+            // No more plays? End turn
+            if(n.playsRemaining<=0)return endTurn(n);
+            // Still has plays — return state, effect will re-fire due to playsRemaining change
+            return n;
+          }
+          return endTurn(prev);
+        });
+      },spd);
+      return()=>clearTimeout(t);
+    }
+  },[gs?.currentPlayer,gs?.phase,gs?.playsRemaining,gs?.pendingAction?.current,gs?.pendingAction?.jsnChain?.length,gs?.winner,isMyTurn,spd]);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[gs?.log?.length]);
 
@@ -416,7 +465,7 @@ function App(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:12,fontWeight:700,color:"#a0aec0"}}>PROPERTIES</span><span style={{fontSize:11,color:"#718096"}}>{gs.mode==="millionaire"?`Rent engine`:`⭐ ${compSets(human)}/3`}</span></div>
       {!Object.keys(human.properties).length?<div style={{fontSize:11,color:"#4a5568",padding:"8px 0",fontStyle:"italic"}}>No properties</div>:
       <div style={{display:"flex",flexDirection:"column",gap:6}}>{Object.entries(human.properties).map(([c,cards])=><div key={c}>
-        <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}><div style={{width:10,height:10,borderRadius:2,background:COLORS[c]?.bg,border:isComp(human,c)?"1.5px solid #f39c12":"1px solid rgba(255,255,255,0.2)"}} /><span style={{fontSize:10,fontWeight:700,color:"#a0aec0"}}>{COLORS[c]?.name} ({cards.length}/{COLORS[c]?.required}){isComp(human,c)?" ✓":""}{human.sets?.[c]?.house?" 🏡":""}{human.sets?.[c]?.hotel?" 🏨":""} ${rentV(human,c)}M</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:3,flexWrap:"wrap"}}><div style={{width:10,height:10,borderRadius:2,background:COLORS[c]?.bg,border:isComp(human,c)?"1.5px solid #f39c12":"1px solid rgba(255,255,255,0.2)"}} /><span style={{fontSize:10,fontWeight:700,color:"#a0aec0"}}>{COLORS[c]?.name} ({cards.length}/{COLORS[c]?.required}){isComp(human,c)?" ✓":""}{human.sets?.[c]?.house?" 🏡":""}{human.sets?.[c]?.hotel?" 🏨":""}</span><span style={{fontSize:9,color:"#718096",marginLeft:4}}>{COLORS[c]?.rents?.map((r,i)=>{const active=i+1===Math.min(cards.length,COLORS[c].rents.length);return active?`[${i+1}→$${r}M]`:`${i+1}→$${r}M`;}).join(" ")}{human.sets?.[c]?.house?" +🏡$3M":""}{human.sets?.[c]?.hotel?" +🏨$4M":""} = ${rentV(human,c)}M</span></div>
         <div style={{display:"flex",gap:3,flexWrap:"wrap",paddingLeft:14}}>{cards.map(x=>{const isW=x.subtype==="wild"||x.subtype==="rainbow";return<div key={x.id} style={{position:"relative"}} onDoubleClick={()=>setCardDetail(x)}>
           <Card card={x} small selected={isPay&&paySel.includes(x.id)} onClick={isPay?()=>setPaySel(p=>p.includes(x.id)?p.filter(z=>z!==x.id):[...p,x.id]):undefined} />
           {isW&&isMyTurn&&gs.phase==="play"&&!isPay&&<div style={{position:"absolute",top:-6,right:-6,display:"flex",gap:1}}>{(x.subtype==="rainbow"?Object.keys(COLORS).filter(z=>z!=="railroad"&&z!=="utility"&&z!==c):x.colors.filter(z=>z!==c)).slice(0,3).map(to=><button key={to} onClick={e=>{e.stopPropagation();setGs(p=>reassignW(p,x.id,c,to));flash("Wild moved!");}} style={{width:14,height:14,borderRadius:7,background:COLORS[to]?.bg,border:"1.5px solid #FFF",cursor:"pointer",padding:0}} />)}</div>}
@@ -447,7 +496,7 @@ function App(){
           <button onClick={()=>{setGs(p=>endTurn(p));setSel(null);setFdStep(null);}} style={{padding:"6px 14px",borderRadius:6,background:"#e74c3c",border:"none",color:"#FFF",fontSize:12,fontWeight:700,cursor:"pointer"}}>End Turn</button>
         </div>
       </div>:
-      <span style={{fontSize:12,color:"#718096"}}>{aiThink?`${cur?.name} thinking...`:isPay?"Select cards to pay":isDisc?"Discard to 7":isJSN?"Just Say No...":gs.phase==="draw"?"Drawing...":gs.phase==="awaitingPayment"?`${gs.players[gs.pendingAction?.current]?.name} paying...`:`${cur?.name}'s turn`}</span>}
+      <span style={{fontSize:12,color:"#718096"}}>{isPay?"Select cards to pay":isDisc?"Discard to 7":isJSN?"Just Say No...":gs.phase==="draw"?"Drawing...":gs.phase==="awaitingPayment"?`${gs.players[gs.pendingAction?.current]?.name} paying...`:gs.phase==="play"&&!isMyTurn?`${cur?.name} thinking...`:`${cur?.name}'s turn`}</span>}
     </div>
 
     {isMyTurn&&gs.phase==="play"&&wilds.length>0&&<div style={{padding:"3px 12px",fontSize:10,color:"#4a5568",textAlign:"center"}}>Tap dots on wilds to rearrange (free)</div>}
