@@ -219,16 +219,24 @@ function App(){
   const prevTurn=useRef(null);
   useEffect(()=>{if(!gs)return;if(prevTurn.current!==null&&gs.currentPlayer===0&&prevTurn.current!==0){showBanner("Your turn!","#2ecc71");}prevTurn.current=gs.currentPlayer;},[gs?.currentPlayer]);
 
-  // AI automation loop
+  // AI automation loop — ref-based timer prevents cleanup races
+  const aiTimer=useRef(null);
+  const clearAI=useCallback(()=>{if(aiTimer.current){clearTimeout(aiTimer.current);aiTimer.current=null;}},[]);
+
   useEffect(()=>{
-    if(!gs||gs.winner!==null)return;
+    clearAI();
+    if(!gs||gs.winner!==null)return clearAI;
+
+    const schedule=(fn,delay)=>{
+      aiTimer.current=setTimeout(()=>{aiTimer.current=null;fn();},Math.max(50,delay));
+    };
 
     // JSN prompt — AI responds
     if(gs.phase==="justSayNoPrompt"&&gs.pendingAction){
       const a=gs.pendingAction,chain=a.jsnChain||[];
       const ri=chain.length%2===0?a.current:a.fromPlayer;
-      if(ri===0)return; // human responds via UI
-      const t=setTimeout(()=>{
+      if(ri===0)return clearAI;
+      schedule(()=>{
         setGs(prev=>{
           if(!prev?.pendingAction?.awaitJSN)return prev;
           const pa=prev.pendingAction;const ch=pa.jsnChain||[];
@@ -240,57 +248,56 @@ function App(){
           }
           return decJSN(prev);
         });
-      },spd+100);
-      return()=>clearTimeout(t);
+      },spd);
+      return clearAI;
     }
 
     // Payment — AI pays
     if(gs.phase==="awaitingPayment"&&gs.pendingAction?.current!==null&&gs.pendingAction.current!==0){
-      const t=setTimeout(()=>{
+      schedule(()=>{
         setGs(prev=>{
           if(!prev?.pendingAction||prev.pendingAction.current===null||prev.pendingAction.current===0)return prev;
           return autoPay(prev,prev.pendingAction.current);
         });
-      },spd-100);
-      return()=>clearTimeout(t);
+      },spd);
+      return clearAI;
     }
 
-    // Not AI's turn
-    if(isMyTurn)return;
+    // Human's turn — don't automate
+    if(gs.currentPlayer===0)return clearAI;
 
-    // Draw phase
+    // Draw phase — AI draws
     if(gs.phase==="draw"){
-      const t=setTimeout(()=>{
+      schedule(()=>{
         setGs(prev=>{
           if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;
           return startTurn(prev);
         });
       },spd);
-      return()=>clearTimeout(t);
+      return clearAI;
     }
 
-    // Play phase — AI makes one move per effect cycle
+    // Play phase — AI makes one move
     if(gs.phase==="play"){
-      const t=setTimeout(()=>{
+      schedule(()=>{
         setGs(prev=>{
           if(!prev||prev.winner!==null||prev.phase!=="play"||prev.currentPlayer===0)return prev;
           const cp=prev.players[prev.currentPlayer];
           const move=getAIMove(prev,cp?.difficulty||"easy");
           if(move&&prev.playsRemaining>0){
             let n=execAI(prev,move);
-            // If action created a pending action or changed phase, stop and let next effect cycle handle it
             if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
-            // No more plays? End turn
             if(n.playsRemaining<=0)return endTurn(n);
-            // Still has plays — return state, effect will re-fire due to playsRemaining change
             return n;
           }
           return endTurn(prev);
         });
       },spd);
-      return()=>clearTimeout(t);
+      return clearAI;
     }
-  },[gs?.currentPlayer,gs?.phase,gs?.playsRemaining,gs?.pendingAction?.current,gs?.pendingAction?.jsnChain?.length,gs?.winner,isMyTurn,spd]);
+
+    return clearAI;
+  },[gs?.currentPlayer,gs?.phase,gs?.playsRemaining,gs?.pendingAction?.current,gs?.pendingAction?.jsnChain?.length,gs?.winner,spd,clearAI]);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[gs?.log?.length]);
 
