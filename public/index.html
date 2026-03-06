@@ -69,7 +69,7 @@ function buildDeck(){
   [[1,6],[2,5],[3,3],[4,3],[5,2],[10,1]].forEach(([v,n])=>{for(let i=0;i<n;i++)c.push(mk("money","cash",{value:v}));});
   return c;
 }
-function shuffle(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
+function shuffle(a){let b=[...a];for(let r=0;r<5;r++){for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}}return b;}
 function dc(o){return JSON.parse(JSON.stringify(o));}
 
 // Millionaire Deal deck — different wildcards, same properties/actions/money/rent
@@ -107,7 +107,7 @@ function createGame(nP,diffs,mode="original"){
   const deck=shuffle(mode==="millionaire"?buildMillionaireDeck():buildDeck());const players=[];
   for(let i=0;i<nP;i++)players.push({id:i,name:i===0?"You":AI_NAMES[(i-1)%4],isHuman:i===0,difficulty:i===0?null:(diffs[i-1]||"easy"),hand:[],bank:[],properties:{},sets:{}});
   let dp=[...deck];players.forEach(p=>{p.hand=dp.splice(0,5);});
-  return{players,drawPile:dp,discardPile:[],currentPlayer:Math.floor(Math.random()*nP),playsRemaining:3,phase:"draw",turnNumber:1,winner:null,pendingAction:null,log:[`${mode==="millionaire"?"Millionaire Deal":"Monopoly Deal"} started!`],discardNeeded:0,gS:{rent:0,jsn:0,db:0,turns:0},mode};
+  return{players,drawPile:dp,discardPile:[],currentPlayer:Math.floor(Math.random()*nP),playsRemaining:0,phase:"setup",turnNumber:0,winner:null,pendingAction:null,log:[`${mode==="millionaire"?"Millionaire Deal":"Monopoly Deal"} started!`],discardNeeded:0,gS:{rent:0,jsn:0,db:0,turns:0},mode};
 }
 function drawC(st,n){const s=dc(st);const p=s.players[s.currentPlayer];for(let i=0;i<n;i++){if(!s.drawPile.length){if(!s.discardPile.length)break;s.drawPile=shuffle(s.discardPile);s.discardPile=[];s.log.push("Reshuffled discard.");}p.hand.push(s.drawPile.shift());}return s;}
 function startTurn(st){let s=dc(st);const p=s.players[s.currentPlayer];const n=p.hand.length===0?5:2;s=drawC(s,n);s.phase="play";s.playsRemaining=3;s.gS.turns++;s.log.push(`${p.name}'s turn — drew ${n} cards.`);return s;}
@@ -145,8 +145,8 @@ function playDB(st,cid,tp,tc){let s=dc(st);const p=s.players[s.currentPlayer];co
 function playFD(st,cid,mci,mco,tp,tci,tco){let s=dc(st);const p=s.players[s.currentPlayer];const i=p.hand.findIndex(c=>c.id===cid);if(i===-1||s.playsRemaining<=0)return s;s.discardPile.push(p.hand.splice(i,1)[0]);s.playsRemaining--;s.log.push(`${p.name} — Forced Deal on ${s.players[tp].name}.`);return initAct(s,"forcedDeal",s.currentPlayer,[tp],{myCardId:mci,myColor:mco,targetCardId:tci,targetColor:tco});}
 function makePay(st,pi,ids){let s=dc(st);const payer=s.players[pi];const a=s.pendingAction;if(!a)return s;const recv=s.players[a.fromPlayer];const xfer=[];ids.forEach(id=>{let bi=payer.bank.findIndex(c=>c.id===id);if(bi!==-1){xfer.push(payer.bank.splice(bi,1)[0]);return;}for(const[c,cards]of Object.entries(payer.properties)){const pi2=cards.findIndex(x=>x.id===id);if(pi2!==-1){xfer.push(cards.splice(pi2,1)[0]);if(!cards.length){delete payer.properties[c];if(payer.sets?.[c])delete payer.sets[c];}return;}}});xfer.forEach(c=>recv.bank.push(c));s.log.push(`${payer.name} paid $${xfer.reduce((s,c)=>s+(c.value||0),0)}M.`);a.resolved.push(pi);a.current=null;return advAct(checkWin(s));}
 function autoPay(st,pi){let s=dc(st);const payer=s.players[pi];const a=s.pendingAction;if(!a)return s;const avail=[];payer.bank.forEach(c=>avail.push({...c,pri:0}));Object.entries(payer.properties).forEach(([c,cards])=>{const comp=isComp(payer,c);cards.forEach(x=>avail.push({...x,pri:comp?10:1}));});if(!avail.length){a.resolved.push(pi);a.current=null;s.log.push(`${payer.name} — nothing to pay.`);return advAct(s);}avail.sort((a,b)=>a.pri-b.pri||(a.value||0)-(b.value||0));let total=0;const ids=[];for(const c of avail){if(total>=a.amount)break;ids.push(c.id);total+=(c.value||0);}return makePay(s,pi,ids);}
-function endTurn(st){let s=dc(st);const p=s.players[s.currentPlayer];if(p.hand.length>7){if(p.isHuman){s.phase="discardSelect";s.discardNeeded=p.hand.length-7;return s;}while(p.hand.length>7){p.hand.sort((a,b)=>(a.value||0)-(b.value||0));const d=p.hand.shift();s.discardPile.push(d);s.log.push(`${p.name} discarded.`);}}s.currentPlayer=(s.currentPlayer+1)%s.players.length;s.turnNumber++;s.phase="draw";s.playsRemaining=0;s.discardNeeded=0;return s;}
-function humanDisc(st,ids){let s=dc(st);const p=s.players[s.currentPlayer];ids.forEach(id=>{const i=p.hand.findIndex(c=>c.id===id);if(i!==-1)s.discardPile.push(p.hand.splice(i,1)[0]);});s.currentPlayer=(s.currentPlayer+1)%s.players.length;s.turnNumber++;s.phase="draw";s.playsRemaining=0;s.discardNeeded=0;return s;}
+function endTurn(st){let s=dc(st);const p=s.players[s.currentPlayer];if(p.hand.length>7){if(p.isHuman){s.phase="discardSelect";s.discardNeeded=p.hand.length-7;return s;}while(p.hand.length>7){p.hand.sort((a,b)=>(a.value||0)-(b.value||0));const d=p.hand.shift();s.discardPile.push(d);}}s.currentPlayer=(s.currentPlayer+1)%s.players.length;s.turnNumber++;s.playsRemaining=0;s.discardNeeded=0;return startTurn(s);}
+function humanDisc(st,ids){let s=dc(st);const p=s.players[s.currentPlayer];ids.forEach(id=>{const i=p.hand.findIndex(c=>c.id===id);if(i!==-1)s.discardPile.push(p.hand.splice(i,1)[0]);});s.currentPlayer=(s.currentPlayer+1)%s.players.length;s.turnNumber++;s.playsRemaining=0;s.discardNeeded=0;return startTurn(s);}
 
 function getAIMove(st,diff){const p=st.players[st.currentPlayer];if(!p.hand.length||st.playsRemaining<=0)return null;const m=[];const isMill=st.mode==="millionaire";const bankBoost=isMill?3:0;
 const myComp=compSets(p);const maxOppComp=Math.max(0,...st.players.filter((_,i)=>i!==st.currentPlayer).map(x=>compSets(x)));const urgent=maxOppComp>=2;
@@ -220,7 +220,7 @@ function App(){
   const prevTurn=useRef(null);
   useEffect(()=>{if(!gs)return;if(prevTurn.current!==null&&gs.currentPlayer===0&&prevTurn.current!==0){showBanner("Your turn!","#2ecc71");}prevTurn.current=gs.currentPlayer;},[gs?.currentPlayer]);
 
-  // AI automation — interval-based polling, immune to effect cleanup races
+  // AI automation — interval polls state ref, immune to React render cycles
   const gsRef=useRef(gs);
   gsRef.current=gs;
   const aiPending=useRef(false);
@@ -234,16 +234,16 @@ function App(){
       if(g.phase==="justSayNoPrompt"&&g.pendingAction){
         const chain=g.pendingAction.jsnChain||[];
         const ri=chain.length%2===0?g.pendingAction.current:g.pendingAction.fromPlayer;
-        if(ri===0)return;
+        if(ri===0)return; // human decides
         aiPending.current=true;
         setTimeout(()=>{
           setGs(prev=>{
-            if(!prev?.pendingAction?.awaitJSN){aiPending.current=false;return prev;}
+            aiPending.current=false;
+            if(!prev?.pendingAction?.awaitJSN)return prev;
             const pa=prev.pendingAction;const ch=pa.jsnChain||[];
             const respIdx=ch.length%2===0?pa.current:pa.fromPlayer;
-            if(respIdx===0){aiPending.current=false;return prev;}
+            if(respIdx===0)return prev;
             const rp=prev.players[respIdx];
-            aiPending.current=false;
             if(hasJSN(rp)&&Math.random()<(AI_DIFF[rp.difficulty]?.jsn||0.3)&&(pa.type==="dealBreaker"||Math.random()<0.7)){
               return playJSN(prev,respIdx);
             }
@@ -266,23 +266,10 @@ function App(){
         return;
       }
 
-      // Human's turn
+      // Human's turn — do nothing
       if(g.currentPlayer===0)return;
 
-      // Draw
-      if(g.phase==="draw"){
-        aiPending.current=true;
-        setTimeout(()=>{
-          setGs(prev=>{
-            aiPending.current=false;
-            if(!prev||prev.phase!=="draw"||prev.currentPlayer===0)return prev;
-            return startTurn(prev);
-          });
-        },spd);
-        return;
-      }
-
-      // Play
+      // AI Play phase — make one move
       if(g.phase==="play"){
         aiPending.current=true;
         setTimeout(()=>{
@@ -293,16 +280,17 @@ function App(){
             const move=getAIMove(prev,cp?.difficulty||"easy");
             if(move&&prev.playsRemaining>0){
               let n=execAI(prev,move);
-              if(n.winner!==null||n.pendingAction||n.phase!=="play")return n;
+              if(n.winner!==null)return n;
+              if(n.pendingAction||n.phase!=="play")return n;
               if(n.playsRemaining<=0)return endTurn(n);
-              return n;
+              return n; // still has plays, interval will pick up next tick
             }
-            return endTurn(prev);
+            return endTurn(prev); // no valid moves, end turn
           });
         },spd);
         return;
       }
-    },200);
+    },250);
     return()=>clearInterval(iv);
   },[spd]);
 
@@ -510,7 +498,7 @@ function App(){
           <button onClick={()=>{setGs(p=>endTurn(p));setSel(null);setFdStep(null);}} style={{padding:"6px 14px",borderRadius:6,background:"#e74c3c",border:"none",color:"#FFF",fontSize:12,fontWeight:700,cursor:"pointer"}}>End Turn</button>
         </div>
       </div>:
-      <span style={{fontSize:12,color:"#718096"}}>{isPay?"Select cards to pay":isDisc?"Discard to 7":isJSN?"Just Say No...":gs.phase==="draw"?"Drawing...":gs.phase==="awaitingPayment"?`${gs.players[gs.pendingAction?.current]?.name} paying...`:gs.phase==="play"&&!isMyTurn?`${cur?.name} thinking...`:`${cur?.name}'s turn`}</span>}
+      <span style={{fontSize:12,color:"#718096"}}>{isPay?"Select cards to pay":isDisc?"Discard to 7":isJSN?"Just Say No...":gs.phase==="awaitingPayment"?`${gs.players[gs.pendingAction?.current]?.name} paying...`:gs.phase==="play"&&!isMyTurn?`${cur?.name} thinking...`:`${cur?.name}'s turn`}</span>}
     </div>
 
     {isMyTurn&&gs.phase==="play"&&wilds.length>0&&<div style={{padding:"3px 12px",fontSize:10,color:"#4a5568",textAlign:"center"}}>Tap dots on wilds to rearrange (free)</div>}
